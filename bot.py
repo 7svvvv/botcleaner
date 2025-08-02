@@ -1,3 +1,5 @@
+from flask import Flask
+from threading import Thread
 import re
 import time
 import os
@@ -11,27 +13,30 @@ from telegram.ext import (
     CommandHandler, CallbackQueryHandler, ChatMemberHandler, filters
 )
 
-nest_asyncio.apply()
-TOKEN = "8080826250:AAHY4wpmF46mcLSkZVTxr8paB8IHh5VNbPM"  # 🔐 ВСТАВЬ СЮДА СВОЙ ТОКЕН
+# 🌐 Flask веб-сервер
+app = Flask('')
 
+@app.route('/')
+def home():
+    return "Бот жив! Пишите @tozalashkerak_bot чтобы получить доступ к боту модератору."
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    Thread(target=run_web).start()
+
+# 📂 Конфигурация
+nest_asyncio.apply()
+TOKEN = "8080826250:AAHY4wpmF46mcLSkZVTxr8paB8IHh5VNbPM"  # ⛔ Укажи свой токен от @BotFather
 GROUPS_DIR = "groups"
 os.makedirs(GROUPS_DIR, exist_ok=True)
 
-# 🔁 Генерация паттернов с обходами
-def generate_patterns(word):
-    clean = word.lower()
-    base = ''.join([f"[{re.escape(c)}]+[ .\\-_@*]?" for c in clean])
-    return [
-        fr"(?i){word}",
-        fr"(?i){base[:-9]}",  # убираем последний необязательный символ
-    ]
-
-# 📂 Загрузка badwords.txt
+# 📥 Загрузка badwords
 def load_badwords():
     path = "badwords.txt"
     with open(path, "r", encoding="utf-8") as f:
         patterns = [line.strip() for line in f if line.strip()]
-    
     compiled = []
     for i, p in enumerate(patterns, start=1):
         try:
@@ -40,7 +45,7 @@ def load_badwords():
             print(f"[!] Ошибка в строке {i}: {p} → {e}")
     return compiled
 
-# 🧠 Пользовательские группы
+# 👤 Работа с группами
 def user_group_file(user_id):
     return os.path.join(GROUPS_DIR, f"{user_id}.json")
 
@@ -61,7 +66,7 @@ def load_user_groups(user_id):
             return json.load(f)
     return {}
 
-# /start — Главное меню
+# 📲 Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private":
         return
@@ -86,7 +91,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# 🔘 Инлайн-кнопки
+# 🔘 Обработка кнопок
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
@@ -96,8 +101,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             "📘 *О боте:*\n"
             "Удаляет рекламу, маты, ссылки и спам.\n"
-            "После 5 нарушений — блокировка сообщений.\n"
-            "👨‍💻 Управляется кнопками и работает как админ.",
+            "После 5 нарушений — блокировка сообщений.",
             parse_mode="Markdown"
         )
     elif query.data == "my_groups":
@@ -133,7 +137,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
-# 👥 Учёт групп
+# 📌 Учёт групп
 async def track_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.my_chat_member.chat
     user = update.my_chat_member.from_user
@@ -147,7 +151,7 @@ async def track_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_admin=new_status == "administrator"
         )
 
-# 🧹 Модерация сообщений
+# 🧼 Очистка сообщений
 badword_patterns = load_badwords()
 
 async def clean_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -160,6 +164,8 @@ async def clean_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user.username == "GroupAnonymousBot" or user.id == 1087968824:
         return
+
+    mention = f"[{user.first_name}](tg://user?id={user.id})"
 
     for pattern in badword_patterns:
         if pattern.search(text):
@@ -176,21 +182,31 @@ async def clean_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if count < 5:
                 await context.bot.send_message(
                     chat.id,
-                    f"⚠️ @{user.username or user.first_name}, предупреждение {count}/5. Не нарушай!"
+                    f"⚠️ {mention}, предупреждение {count}/5. Не нарушай!",
+                    parse_mode="Markdown"
                 )
             else:
-                await context.bot.restrict_chat_member(
-                    chat.id, uid, ChatPermissions(can_send_messages=False)
-                )
-                context.chat_data.setdefault("muted_users", {})[uid] = {
-                    "username": user.username,
-                    "name": user.first_name,
-                    "muted_at": time.time()
-                }
-                await context.bot.send_message(
-                    chat.id,
-                    f"🚫 @{user.username or user.first_name}, ты получил 5 нарушений и теперь замучен. Обратись к админам."
-                )
+                member = await context.bot.get_chat_member(chat.id, uid)
+                if member.status not in ["administrator", "creator"]:
+                    await context.bot.restrict_chat_member(
+                        chat.id, uid, ChatPermissions(can_send_messages=False)
+                    )
+                    context.chat_data.setdefault("muted_users", {})[uid] = {
+                        "username": user.username,
+                        "name": user.first_name,
+                        "muted_at": time.time()
+                    }
+                    await context.bot.send_message(
+                        chat.id,
+                        f"🚫 {mention}, ты получил 5 нарушений и теперь замучен. Обратись к админам.",
+                        parse_mode="Markdown"
+                    )
+                else:
+                    await context.bot.send_message(
+                        chat.id,
+                        f"⚠️ {mention} — админ, не могу замутить.",
+                        parse_mode="Markdown"
+                    )
             return
 
 # 🔕 Удаление приветствий
@@ -201,7 +217,7 @@ async def handle_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
-# 🚀 Запуск
+# 🚀 Старт приложения
 async def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
@@ -215,5 +231,7 @@ async def main():
     print("🤖 Бот запущен и слушает...")
     await app.run_polling()
 
+# 🏁 Запуск
 if __name__ == "__main__":
+    keep_alive()
     asyncio.run(main())
