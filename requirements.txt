@@ -1,5 +1,5 @@
 python-telegram-bot==20.8
 nest_asyncio
-aiogram==3.4.1
+aiogram==3.4.1 --only-binary :all:
 Flask==3.0.3
 yt-dlp
